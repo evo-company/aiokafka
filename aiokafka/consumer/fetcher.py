@@ -659,6 +659,7 @@ class Fetcher:
             response = yield from self._client.send(node_id, request)
         except Errors.KafkaError as err:
             log.error("Failed fetch messages from %s: %s", node_id, err)
+            yield from asyncio.sleep(self._retry_backoff, loop=self._loop)
             return False
         except asyncio.CancelledError:
             # Either `close()` or partition unassigned. Either way the result
