@@ -273,6 +273,14 @@ class AIOKafkaClient:
             return None
         return random.choice(nodeids)
 
+    _BOOTSTRAP_ID = ('bootstrap', ConnectionGroup.DEFAULT)
+
+    def _get_node_ids(self):
+        nodeids = [b.nodeId for b in self.cluster.brokers()]
+        if self._BOOTSTRAP_ID in self._conns:
+            nodeids.append('bootstrap')
+        return nodeids
+
     @asyncio.coroutine
     def _metadata_update(self, cluster_metadata, topics):
         assert isinstance(cluster_metadata, ClusterMetadata)
@@ -281,10 +289,20 @@ class AIOKafkaClient:
         if version_id == 1 and not topics:
             topics = None
         metadata_request = MetadataRequest[version_id](topics)
-        nodeids = [b.nodeId for b in self.cluster.brokers()]
-        bootstrap_id = ('bootstrap', ConnectionGroup.DEFAULT)
-        if bootstrap_id in self._conns:
-            nodeids.append('bootstrap')
+        nodeids = self._get_node_ids()
+
+        if not nodeids:
+            # if we lost all brokers and we don't have bootstrap connection - we
+            # need to bootstrap again
+            log.debug("Attempting to re-bootstrap when updating metadata")
+            try:
+                yield from self.bootstrap()
+                log.debug("Re-bootstrapping successfull")
+                nodeids = self._get_node_ids()
+            except ConnectionError:
+                log.debug("Failed to re-bootstrap")
+                nodeids = []
+
         random.shuffle(nodeids)
         for node_id in nodeids:
             conn = yield from self._get_conn(node_id)
@@ -312,8 +330,9 @@ class AIOKafkaClient:
 
             # We only keep bootstrap connection to update metadata until
             # proper cluster layout is available.
-            if bootstrap_id in self._conns and len(self.cluster.brokers()):
-                conn = self._conns.pop(bootstrap_id)
+            if self._BOOTSTRAP_ID in self._conns and \
+                    len(self.cluster.brokers()):
+                conn = self._conns.pop(self._BOOTSTRAP_ID)
                 conn.close()
 
             break
