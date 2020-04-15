@@ -514,8 +514,14 @@ class GroupCoordinator(BaseCoordinator):
         if self.coordinator_id is not None:
             return
 
+        retry_backoff = self._retry_backoff_ms / 1000
+
+        # wait while we know brokers
+        while len(self._client.cluster.brokers()) == 0:
+            if not (yield from self._client.force_metadata_update()):
+                yield from asyncio.sleep(retry_backoff, loop=self._loop)
+
         with (yield from self._coordinator_lookup_lock):
-            retry_backoff = self._retry_backoff_ms / 1000
             while self.coordinator_id is None:
                 try:
                     coordinator_id = (
