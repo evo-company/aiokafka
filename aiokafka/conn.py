@@ -337,7 +337,9 @@ class AIOKafkaConnection:
         try:
             read_task.result()
         except (OSError, EOFError, ConnectionError) as exc:
-            self_ref().close(reason=CloseReason.CONNECTION_BROKEN, exc=exc)
+            self = self_ref()
+            if self is not None:
+                self.close(reason=CloseReason.CONNECTION_BROKEN, exc=exc)
         except Exception as exc:
             self = self_ref()
             self.log.exception("Unexpected exception in AIOKafkaConnection")
